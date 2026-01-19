@@ -1,0 +1,39 @@
+# 1. LA RAÍZ
+dn: dc=fis,dc=epn,dc=edu,dc=ec
+objectClass: top
+objectClass: dcObject
+objectClass: organization
+o: Facultad de Ingenieria en Sistemas
+dc: fis
+
+# 2. LAS RAMAS PRINCIPALES
+dn: ou=People,dc=fis,dc=epn,dc=edu,dc=ec
+objectClass: organizationalUnit
+ou: People
+
+dn: ou=Groups,dc=fis,dc=epn,dc=edu,dc=ec
+objectClass: organizationalUnit
+ou: Groups
+
+# 3. LOS GRUPOS DE LA FACULTAD
+
+# Grupo de Estudiantes (GID 2000)
+dn: cn=estudiantes,ou=Groups,dc=fis,dc=epn,dc=edu,dc=ec
+objectClass: posixGroup
+objectClass: top
+cn: estudiantes
+gidNumber: 2000
+
+# Grupo de Profesores (GID 5000)
+dn: cn=profesores,ou=Groups,dc=fis,dc=epn,dc=edu,dc=ec
+objectClass: posixGroup
+objectClass: top
+cn: profesores
+gidNumber: 5000
+
+# Grupo de Administrativos (GID 3000)
+dn: cn=administrativos,ou=Groups,dc=fis,dc=epn,dc=edu,dc=ec
+objectClass: posixGroup
+objectClass: top
+cn: administrativos
+gidNumber: 3000
