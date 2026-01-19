@@ -1,0 +1,5 @@
+// Zona directa para fis.epn.edu.ec
+zone "fis.epn.edu.ec" {
+    type master;
+    file "/etc/bind/db.fis.epn.edu.ec";
+};
