@@ -1,13 +1,16 @@
 #!/bin/bash
 
 # ==============================================================================
-# SCRIPT DE GESTIÓN DE USUARIOS (CRUD v2) - FIS EPN
+# GESTIÓN DE USUARIOS INTEGRADA (LDAP + KERBEROS + SSH)
+# Autor: Kevin Martinez
+# Versión: 3.0 (Fix: ShadowExpire & Home Permissions)
 # ==============================================================================
 
-# CONFIGURACIÓN
+# 1. CONFIGURACIÓN
+# ============================
 DOMAIN_DN="dc=fis,dc=epn,dc=edu,dc=ec"
 ADMIN_DN="cn=admin,$DOMAIN_DN"
-PASS_ADMIN="Sistemas2026." 
+PASS_ADMIN="Sistemas2026."
 REALM="FIS.EPN.EDU.EC"
 
 # Colores
@@ -16,40 +19,46 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# Verificación Root
+# Verificación de Root
 if [ "$EUID" -ne 0 ]; then
-    echo -e "${RED}[ERROR] Ejecutar como root (sudo).${NC}"
+    echo -e "${RED}[ERROR] Debes ejecutar este script como root (sudo).${NC}"
     exit 1
 fi
 
 # ==============================================================================
-# FUNCIONES
+# FUNCIONES CRUD
 # ==============================================================================
 
+# --- [C] REATE ---
 crear_usuario() {
     echo -e "\n${BLUE}=== CREAR NUEVO USUARIO ===${NC}"
-    read -p "Nombre de usuario (ej: juan.perez): " USER_ID
-    read -p "Nombre (ej: Juan): " NOMBRE
-    read -p "Apellido (ej: Perez): " APELLIDO
-    
+    read -p "User ID (ej: ana.lopez): " USER_ID
+    read -p "Nombre (ej: Ana): " NOMBRE
+    read -p "Apellido (ej: Lopez): " APELLIDO
+
     echo "Seleccione el Rol:"
     echo "  1) Estudiante (GID 2000)"
     echo "  2) Profesor (GID 5000)"
-    echo "  3) Administrativo (GID 3000)" # <--- NUEVO
+    echo "  3) Administrativo (GID 3000)"
     read -p "Opción: " ROL_OPT
 
     case $ROL_OPT in
         1) GID=2000; DESC="Estudiante" ;;
         2) GID=5000; DESC="Profesor" ;;
-        3) GID=3000; DESC="Administrativo" ;; # <--- NUEVO
+        3) GID=3000; DESC="Administrativo" ;;
         *) echo -e "${RED}Opción inválida.${NC}"; return ;;
     esac
 
-    UID_NUM=$((3000 + RANDOM % 5000))
+    # UID Aleatorio
+    UID_NUM=$((3000 + RANDOM % 6000))
 
-    echo -e "${GREEN}Creando a $NOMBRE $APELLIDO ($USER_ID) - $DESC...${NC}"
+    # CALCULAR FECHA DE HOY (Días desde 1970)
+    # Esto evita el error: "You are required to change your password immediately"
+    HOY=$(($(date +%s) / 86400))
 
-    # Crear LDIF
+    echo -e "${GREEN}Creando a $NOMBRE $APELLIDO ($USER_ID)...${NC}"
+
+    # 1. Crear LDIF
     cat <<EOF > /tmp/new_user.ldif
 dn: uid=$USER_ID,ou=People,$DOMAIN_DN
 objectClass: inetOrgPerson
@@ -64,15 +73,15 @@ homeDirectory: /home/$USER_ID
 loginShell: /bin/bash
 gecos: $NOMBRE $APELLIDO
 userPassword: {crypt}x
-shadowLastChange: 0
+shadowLastChange: $HOY
 shadowMax: 99999
 shadowWarning: 7
 EOF
 
-    # Insertar en LDAP
+    # 2. Inyectar en LDAP
     ldapadd -x -D "$ADMIN_DN" -w "$PASS_ADMIN" -f /tmp/new_user.ldif > /dev/null 2>&1
     if [ $? -eq 0 ]; then
-        echo -e "[LDAP] Usuario agregado correctamente."
+        echo -e "[LDAP] Ficha de usuario creada."
     else
         echo -e "${RED}[LDAP] Error: El usuario ya existe o falló la conexión.${NC}"
         rm /tmp/new_user.ldif
@@ -80,48 +89,43 @@ EOF
     fi
     rm /tmp/new_user.ldif
 
-    # Insertar en Kerberos
+    # 3. Crear Principal en Kerberos
     echo -e "[KERBEROS] Asignando contraseña..."
     kadmin.local -q "addprinc $USER_ID"
 
-    # Crear Home (Necesario para 'su - usuario')
+    # 4. Crear Home Directory (CRÍTICO PARA SSH)
     if [ ! -d "/home/$USER_ID" ]; then
         mkdir -p /home/$USER_ID
         cp -r /etc/skel/. /home/$USER_ID
         chown -R $UID_NUM:$GID /home/$USER_ID
-        echo -e "[SISTEMA] Carpeta personal creada."
+        chmod 700 /home/$USER_ID
+        echo -e "[SISTEMA] Carpeta personal creada y permisos SSH aplicados."
     fi
 
-    echo -e "${GREEN}¡Listo!${NC}"
-    read -p "Enter para continuar..."
+    echo -e "${GREEN}¡Usuario listo para entrar por SSH!${NC}"
+    read -p "Presione Enter..."
 }
 
+# --- [R] EAD ---
 listar_usuarios() {
     echo -e "\n${BLUE}=== LISTADO DE PERSONAL (LDAP) ===${NC}"
-    
-    # Comprobamos si hay alguien primero
-    COUNT=$(ldapsearch -x -b "ou=People,$DOMAIN_DN" "(objectClass=posixAccount)" uid | grep -c "uid:")
-    
-    if [ "$COUNT" -eq "0" ]; then
-        echo -e "${RED}No se encontraron usuarios en la base de datos.${NC}"
-    else
-        echo -e "Se encontraron $COUNT usuarios:\n"
-        # Listado simplificado y robusto (Muestra DN, UID y CN)
-        ldapsearch -x -b "ou=People,$DOMAIN_DN" "(objectClass=posixAccount)" uid uidNumber gidNumber cn | grep -E "uid:|uidNumber:|gidNumber:|cn:"
-    fi
+    # Filtramos solo líneas relevantes para que se vea limpio
+    ldapsearch -x -b "ou=People,$DOMAIN_DN" "(objectClass=posixAccount)" uid uidNumber gidNumber cn | \
+    grep -E "dn:|uid:|uidNumber:|gidNumber:|cn:"
     echo "---------------------------------------------------------------"
-    read -p "Enter para continuar..."
+    read -p "Presione Enter..."
 }
 
+# --- [U] PDATE ---
 modificar_usuario() {
     echo -e "\n${BLUE}=== MODIFICAR USUARIO ===${NC}"
     read -p "Usuario a modificar (uid): " USER_ID
 
-    # Verificación simple
-    if ! ldapsearch -x -b "ou=People,$DOMAIN_DN" "(uid=$USER_ID)" uid | grep -q "uid: $USER_ID"; then
-        echo -e "${RED}El usuario no existe.${NC}"
-        read -p "Enter..."
-        return
+    # Verificar existencia
+    if ! kadmin.local -q "getprinc $USER_ID" | grep -q "Principal: $USER_ID"; then
+       echo -e "${RED}El usuario no existe en Kerberos.${NC}"
+       read -p "Enter..."
+       return
     fi
 
     echo "1) Cambiar Contraseña (Kerberos)"
@@ -130,15 +134,23 @@ modificar_usuario() {
 
     if [ "$MOD_OPT" == "1" ]; then
         kadmin.local -q "cpw $USER_ID"
+        echo -e "${GREEN}Contraseña actualizada.${NC}"
     elif [ "$MOD_OPT" == "2" ]; then
         read -p "Nueva Shell (ej: /bin/sh): " NEW_SHELL
-        echo -e "dn: uid=$USER_ID,ou=People,$DOMAIN_DN\nchangetype: modify\nreplace: loginShell\nloginShell: $NEW_SHELL" | \
-        ldapmodify -x -D "$ADMIN_DN" -w "$PASS_ADMIN"
-        echo "Shell actualizada."
+        cat <<EOF > /tmp/mod.ldif
+dn: uid=$USER_ID,ou=People,$DOMAIN_DN
+changetype: modify
+replace: loginShell
+loginShell: $NEW_SHELL
+EOF
+        ldapmodify -x -D "$ADMIN_DN" -w "$PASS_ADMIN" -f /tmp/mod.ldif
+        rm /tmp/mod.ldif
+        echo -e "${GREEN}Shell actualizada.${NC}"
     fi
     read -p "Enter..."
 }
 
+# --- [D] ELETE ---
 eliminar_usuario() {
     echo -e "\n${BLUE}=== ELIMINAR USUARIO ===${NC}"
     read -p "Usuario a eliminar (uid): " USER_ID
@@ -149,25 +161,36 @@ eliminar_usuario() {
 
     # Borrar LDAP
     ldapdelete -x -D "$ADMIN_DN" -w "$PASS_ADMIN" "uid=$USER_ID,ou=People,$DOMAIN_DN"
-    
+
     # Borrar Kerberos
     kadmin.local -q "delprinc -force $USER_ID" > /dev/null 2>&1
-    
-    echo -e "${GREEN}Usuario eliminado.${NC}"
+
+    # Opcional: Borrar Home
+    if [ -d "/home/$USER_ID" ]; then
+        echo -e "[SISTEMA] ¿Borrar carpeta /home/$USER_ID? (s/n)"
+        read DEL_HOME
+        if [ "$DEL_HOME" == "s" ]; then
+            rm -rf /home/$USER_ID
+            echo "Carpeta borrada."
+        fi
+    fi
+
+    echo -e "${GREEN}Usuario eliminado totalmente.${NC}"
     read -p "Enter..."
 }
 
 # ==============================================================================
-# MENU
+# MENÚ
 # ==============================================================================
 while true; do
     clear
-    echo -e "${GREEN}   GESTIÓN FIS (CRUD v2)${NC}"
+    echo -e "${GREEN}   GESTIÓN FIS (LDAP v2 + SSH FIX)${NC}"
     echo "1. Listar Usuarios"
     echo "2. Crear Usuario"
     echo "3. Modificar Usuario"
     echo "4. Eliminar Usuario"
     echo "5. Salir"
+    echo "----------------------------------------"
     read -p "Opción: " OPCION
 
     case $OPCION in
