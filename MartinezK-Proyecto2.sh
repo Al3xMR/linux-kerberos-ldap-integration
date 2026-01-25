@@ -176,19 +176,34 @@ systemctl restart nslcd
 systemctl restart nscd
 
 # ====================================================
-# FASE 5: SSH CON KERBEROS (SSO)
+# FASE 5: SSH CON KERBEROS (SSO PERFECTO)
 # ====================================================
-echo -e "${CYAN}[FASE 5] Configurando SSH...${NC}"
+echo -e "${CYAN}[FASE 5] Configurando SSH Multi-Identidad...${NC}"
 
-# Limpieza previa de Keytab
+# 1. Limpieza de llaves viejas
 rm -f /etc/krb5.keytab
+
+# 2. Identidad 1: Nombre Real (Para logs y admin)
+# Crea host/srv-fis.fis.epn.edu.ec
 kadmin.local -q "addprinc -randkey host/$SRV_NAME.$DOMAIN"
 kadmin.local -q "ktadd host/$SRV_NAME.$DOMAIN"
 
-# Configuración SSH segura
+# 3. Identidad 2: Alias Corto (Para comodidad del usuario)
+# Crea host/fis.epn.edu.ec
+kadmin.local -q "addprinc -randkey host/$DOMAIN"
+kadmin.local -q "ktadd host/$DOMAIN"
+
+# 4. Configuración SSH para aceptar ambos nombres
+# Habilitar GSSAPI
 sed -i 's/^#GSSAPIAuthentication.*/GSSAPIAuthentication yes/' /etc/ssh/sshd_config
 sed -i 's/^GSSAPIAuthentication.*/GSSAPIAuthentication yes/' /etc/ssh/sshd_config
 sed -i 's/^#GSSAPICleanupCredentials.*/GSSAPICleanupCredentials yes/' /etc/ssh/sshd_config
+
+# IMPORTANTE: Permitir alias (Nombre corto)
+# Si la línea no existe, la agrega al final
+grep -q "^GSSAPIStrictAcceptorCheck" /etc/ssh/sshd_config && sed -i 's/^GSSAPIStrictAcceptorCheck.*/GSSAPIStrictAcceptorCheck no/' /etc/ssh/sshd_config || echo "GSSAPIStrictAcceptorCheck no" >> /etc/ssh/sshd_config
+
+# Habilitar PAM (Para crear home directories automáticamente)
 sed -i 's/^UsePAM no/UsePAM yes/' /etc/ssh/sshd_config
 
 systemctl restart ssh
