@@ -34,6 +34,8 @@ powershell -ExecutionPolicy Bypass -File ..\client_config_scripts\windows_client
 * Enter the **Linux Server IP** when prompted.
 * The script will configure DNS, disable IPv6, and create the PuTTY profile automatically.
 
+![Running the automatic configuration script in PowerShell](./img/2_Windows_ScriptExec.png)
+
 ---
 
 ## Option B: Manual Configuration
@@ -49,7 +51,7 @@ Kerberos requires the client to be able to resolve the domain's SRV records.
 * **Uncheck** the box "Internet Protocol Version 6 (TCP/IPv6)".
 * In "Internet Protocol Version 4 (TCP/IPv4)", set the **Preferred DNS** to your Linux Server IP (e.g., `192.168.1.x`).
 
-![](./img/1_Windows_AdapterSettings.png)
+![Manual network and DNS configuration in the Control Panel](./img/1_Windows_AdapterSettings.png)
 
 ### 2. Kerberos Configuration File (krb5.ini)
 
@@ -92,6 +94,7 @@ To achieve SSO, PuTTY must be configured to use GSSAPI.
 ## Verification and Usage
 
 > **Note:** To perform these tests, you must use a valid user account. 
+
 > You can use the default user **`kevin.martinez`** with the password **`Kevin123.`** (created during server setup), or create a new one by running the `gestion_fis.sh` script on the server.
 
 1. Open **MIT Kerberos Ticket Manager**.
@@ -100,4 +103,4 @@ To achieve SSO, PuTTY must be configured to use GSSAPI.
 4. You should see a valid active ticket.
 5. Open **PuTTY**, load the saved session, and click Open. You should log in without being asked for a password.
 
-```
+![Single-Sign On with SSH on Windows client](./img/4_Windows_SSH_Succesful.png)
