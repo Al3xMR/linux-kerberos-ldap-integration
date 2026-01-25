@@ -1,144 +1,121 @@
 #!/bin/bash
 
 # ==============================================================================
-# PROYECTO 2: SERVICIO DE DIRECTORIO Y AUTENTICACIÓN INTEGRADO (FIS-EPN)
+# PROYECTO 2: SISTEMA INTEGRADO DE IDENTIDAD (FIS-EPN)
 # Autor: Kevin Martinez
-# Versión: 3.1 (Verificación Root + Arquitectura Install-First)
+# Versión: 6.1 (Fix: Prevención de errores BIND duplicados)
 # ==============================================================================
 
-# 0. VERIFICACIÓN DE SEGURIDAD (ROOT CHECK)
-# =========================================
-if [ "$EUID" -ne 0 ]; then
-    echo -e "\033[0;31m[ERROR] Acceso denegado.\033[0m"
-    echo "Este script requiere privilegios de superusuario para instalar paquetes."
-    echo "Uso correcto: sudo $0"
-    exit 1
-fi
+if [ "$EUID" -ne 0 ]; then echo "Ejecutar como root (sudo)."; exit 1; fi
 
 # 1. VARIABLES GLOBALES
-# =====================
 DOMAIN="fis.epn.edu.ec"
 REALM="FIS.EPN.EDU.EC"
 SRV_NAME="srv-fis"
-IP_SRV=$(hostname -I | awk '{print $1}') 
+IP_SRV=$(hostname -I | awk '{print $1}')
 PASS_ADMIN="Sistemas2026."
+USER_DEMO="kevin.martinez"
+PASS_DEMO="Kevin123."
 
-# Colores para logs
+# Colores
 GREEN='\033[0;32m'
-RED='\033[0;31m'
-NC='\033[0m' # No Color
+CYAN='\033[0;36m'
+NC='\033[0m'
 
-echo -e "${GREEN}==================================================${NC}"
-echo -e "${GREEN} INICIANDO DESPLIEGUE - PROYECTO 2 (v3.1)${NC}"
-echo " IP Detectada: $IP_SRV"
-echo -e "${GREEN}==================================================${NC}"
-
-# ====================================================
-# FASE 0: PREPARACIÓN E INSTALACIÓN (CON INTERNET)
-# ====================================================
-echo -e "${GREEN}[FASE 0] Instalando Paquetes (Usando DNS externo)...${NC}"
-
-# 0.1 Asegurar salida a internet (DNS de Google temporal)
+echo -e "${GREEN}=== INICIANDO DESPLIEGUE v6.1 ===${NC}"
 echo "nameserver 8.8.8.8" > /etc/resolv.conf
 
-# 0.2 Pre-configuración para instalación silenciosa
+# ====================================================
+# FASE 0: INSTALACIÓN DE PAQUETES
+# ====================================================
+echo -e "${CYAN}[FASE 0] Instalando Software...${NC}"
 export DEBIAN_FRONTEND=noninteractive
-# Kerberos
+
+# Pre-configuración
 echo "krb5-config krb5-config/default_realm string $REALM" | debconf-set-selections
 echo "krb5-config krb5-config/add_servers_realm boolean true" | debconf-set-selections
-# LDAP
 echo "slapd slapd/domain string $DOMAIN" | debconf-set-selections
 echo "slapd slapd/root_password password $PASS_ADMIN" | debconf-set-selections
 echo "slapd slapd/root_password_again password $PASS_ADMIN" | debconf-set-selections
+echo "libnss-ldapd nslcd/ldap-uris string ldap://127.0.0.1/" | debconf-set-selections
+echo "libnss-ldapd nslcd/ldap-base string dc=fis,dc=epn,dc=edu,dc=ec" | debconf-set-selections
 
-# 0.3 INSTALACIÓN MASIVA
 apt-get update
-apt-get install -y bind9 bind9utils chrony krb5-kdc krb5-admin-server slapd ldap-utils
+apt-get install -y bind9 bind9utils chrony krb5-kdc krb5-admin-server slapd ldap-utils openssh-server libnss-ldapd libpam-ldapd nscd
 
 # ====================================================
-# FASE 1: INFRAESTRUCTURA DE RED (DNS LOCAL)
+# FASE 1: DNS (BIND9) - CORREGIDO
 # ====================================================
-echo -e "${GREEN}[FASE 1] Configurando DNS Local...${NC}"
-
-# 1.1 Configurar Hostname y Hosts
+echo -e "${CYAN}[FASE 1] Configurando DNS...${NC}"
 hostnamectl set-hostname $SRV_NAME
 echo "127.0.0.1 localhost" > /etc/hosts
 echo "$IP_SRV $SRV_NAME.$DOMAIN $SRV_NAME" >> /etc/hosts
 
-# 1.2 Configurar Bind9
-# (Nota: Asumimos que la carpeta conf/ existe y tiene los archivos)
 if [ -f conf/named.conf.local ]; then
     cp conf/named.conf.local /etc/bind/named.conf.local
     sed "s/IP_SERVIDOR/$IP_SRV/g" conf/db.template > /etc/bind/db.fis.epn.edu.ec
+
+    # --- CORRECCIÓN AQUÍ: Sobrescribimos el archivo en lugar de editarlo con sed ---
+    cat <<EOF > /etc/bind/named.conf.options
+options {
+    directory "/var/cache/bind";
+    allow-query { any; };
+    listen-on { any; };
+    dnssec-validation no;
+    listen-on-v6 { any; };
+};
+EOF
+    # -------------------------------------------------------------------------------
+
+    systemctl restart bind9
+    echo "nameserver 127.0.0.1" > /etc/resolv.conf
 else
-    echo -e "${RED}[ERROR] No se encuentra la carpeta conf/ o los archivos de DNS.${NC}"
-    exit 1
+    echo "[ERROR] Faltan archivos en la carpeta conf/"; exit 1
 fi
 
-# 1.3 Activar DNS Local
-systemctl restart bind9
-# Forzamos al servidor a usarse a sí mismo
-echo "nameserver 127.0.0.1" > /etc/resolv.conf
-echo " -> Ahora el servidor usa su propio DNS."
-
 # ====================================================
-# FASE 2: TIEMPO (CHRONY)
+# FASE 2: NTP (CHRONY)
 # ====================================================
-echo -e "${GREEN}[FASE 2] Configurando Reloj...${NC}"
-
-echo "makestep 1.0 3" >> /etc/chrony/chrony.conf
+echo -e "${CYAN}[FASE 2] Sincronizando Tiempo...${NC}"
+# Limpiamos config vieja antes de agregar
+grep -q "makestep" /etc/chrony/chrony.conf || echo "makestep 1.0 3" >> /etc/chrony/chrony.conf
 systemctl restart chrony
-chronyc makestep || echo " -> Advertencia: Chrony no pudo hacer salto (¿ya sincronizado?)"
-echo " -> Reloj configurado."
+chronyc makestep || true
 
 # ====================================================
-# FASE 3: KERBEROS (AUTENTICACIÓN)
+# FASE 3: KERBEROS SERVER (KDC)
 # ====================================================
-echo -e "${GREEN}[FASE 3] Configurando Kerberos...${NC}"
-
-# 3.1 Configuración (krb5.conf)
+echo -e "${CYAN}[FASE 3] Configurando KDC...${NC}"
 cat <<EOF > /etc/krb5.conf
 [libdefaults]
     default_realm = $REALM
     dns_lookup_kdc = true
     dns_lookup_realm = false
-    clockskew = 300
-
 [realms]
     $REALM = {
         kdc = $SRV_NAME.$DOMAIN
         admin_server = $SRV_NAME.$DOMAIN
     }
-
 [domain_realm]
     .$DOMAIN = $REALM
     $DOMAIN = $REALM
 EOF
 
-# 3.2 Crear Base de Datos
-if [ -f /var/lib/krb5kdc/principal ]; then
-    kdb5_util destroy -f
-fi
+if [ -f /var/lib/krb5kdc/principal ]; then kdb5_util destroy -f; fi
 kdb5_util create -s -P "$PASS_ADMIN"
-
-# 3.3 Crear Admin
 kadmin.local -q "addprinc -pw $PASS_ADMIN admin/admin"
-
-systemctl restart krb5-kdc
-systemctl restart krb5-admin-server
+systemctl restart krb5-kdc krb5-admin-server
 
 # ====================================================
-# FASE 4: LDAP (DIRECTORIO)
+# FASE 4: LDAP SERVER
 # ====================================================
-echo -e "${GREEN}[FASE 4] Configurando OpenLDAP...${NC}"
+echo -e "${CYAN}[FASE 4] Configurando LDAP Server...${NC}"
+ldapadd -Y EXTERNAL -H ldapi:/// -f /etc/ldap/schema/cosine.ldif >/dev/null 2>&1
+ldapadd -Y EXTERNAL -H ldapi:/// -f /etc/ldap/schema/nis.ldif >/dev/null 2>&1
+ldapadd -Y EXTERNAL -H ldapi:/// -f /etc/ldap/schema/inetorgperson.ldif >/dev/null 2>&1
 
-# 4.1 Cargar Esquemas Básicos
-ldapadd -Y EXTERNAL -H ldapi:/// -f /etc/ldap/schema/cosine.ldif > /dev/null 2>&1
-ldapadd -Y EXTERNAL -H ldapi:/// -f /etc/ldap/schema/nis.ldif > /dev/null 2>&1
-ldapadd -Y EXTERNAL -H ldapi:/// -f /etc/ldap/schema/inetorgperson.ldif > /dev/null 2>&1
-
-# 4.2 REPARAR CONTRASEÑA ADMIN (Fix Crítico)
-cat <<EOF > /tmp/repair_db.ldif
+# Fix Password Admin
+cat <<EOF > /tmp/repair.ldif
 dn: olcDatabase={1}mdb,cn=config
 changetype: modify
 replace: olcRootDN
@@ -147,13 +124,12 @@ olcRootDN: cn=admin,dc=fis,dc=epn,dc=edu,dc=ec
 replace: olcRootPW
 olcRootPW: $PASS_ADMIN
 EOF
-ldapmodify -Y EXTERNAL -H ldapi:/// -f /tmp/repair_db.ldif
+ldapmodify -Y EXTERNAL -H ldapi:/// -f /tmp/repair.ldif
 
-# 4.3 Generar y Cargar Estructura (People/Groups)
-cat <<EOF > /tmp/base_structure.ldif
+# Estructura Base
+cat <<EOF > /tmp/base.ldif
 dn: dc=fis,dc=epn,dc=edu,dc=ec
 objectClass: top
-objectClass: dcObject
 objectClass: organization
 o: FIS EPN
 dc: fis
@@ -170,16 +146,89 @@ dn: cn=estudiantes,ou=Groups,dc=fis,dc=epn,dc=edu,dc=ec
 objectClass: posixGroup
 cn: estudiantes
 gidNumber: 2000
-
-dn: cn=profesores,ou=Groups,dc=fis,dc=epn,dc=edu,dc=ec
-objectClass: posixGroup
-cn: profesores
-gidNumber: 5000
 EOF
+ldapadd -c -x -D "cn=admin,dc=fis,dc=epn,dc=edu,dc=ec" -w "$PASS_ADMIN" -f /tmp/base.ldif
 
-# Cargamos estructura (-c para continuar si hay errores de duplicados)
-ldapadd -c -x -D "cn=admin,dc=fis,dc=epn,dc=edu,dc=ec" -w "$PASS_ADMIN" -f /tmp/base_structure.ldif
+# ====================================================
+# FASE 4.5: INTEGRACIÓN CLIENTE (NSSWITCH)
+# ====================================================
+echo -e "${CYAN}[FASE 4.5] Configurando Cliente LDAP (getent)...${NC}"
 
-echo -e "${GREEN}==================================================${NC}"
-echo -e "${GREEN} DESPLIEGUE FINALIZADO EXITOSAMENTE${NC}"
-echo -e "${GREEN}==================================================${NC}"
+# Configuración limpia de nslcd.conf (Sobrescritura segura)
+cat <<EOF > /etc/nslcd.conf
+uid nslcd
+gid nslcd
+uri ldap://127.0.0.1/
+base dc=fis,dc=epn,dc=edu,dc=ec
+binddn cn=admin,dc=fis,dc=epn,dc=edu,dc=ec
+bindpw $PASS_ADMIN
+ssl no
+tls_reqcert never
+EOF
+chmod 600 /etc/nslcd.conf
+
+# Reset y configuración de nsswitch.conf
+sed -i 's/^passwd:.*/passwd:         files systemd ldap/' /etc/nsswitch.conf
+sed -i 's/^group:.*/group:          files systemd ldap/' /etc/nsswitch.conf
+sed -i 's/^shadow:.*/shadow:         files ldap/' /etc/nsswitch.conf
+
+systemctl restart nslcd
+systemctl restart nscd
+
+# ====================================================
+# FASE 5: SSH CON KERBEROS (SSO)
+# ====================================================
+echo -e "${CYAN}[FASE 5] Configurando SSH...${NC}"
+
+# Limpieza previa de Keytab
+rm -f /etc/krb5.keytab
+kadmin.local -q "addprinc -randkey host/$SRV_NAME.$DOMAIN"
+kadmin.local -q "ktadd host/$SRV_NAME.$DOMAIN"
+
+# Configuración SSH segura
+sed -i 's/^#GSSAPIAuthentication.*/GSSAPIAuthentication yes/' /etc/ssh/sshd_config
+sed -i 's/^GSSAPIAuthentication.*/GSSAPIAuthentication yes/' /etc/ssh/sshd_config
+sed -i 's/^#GSSAPICleanupCredentials.*/GSSAPICleanupCredentials yes/' /etc/ssh/sshd_config
+sed -i 's/^UsePAM no/UsePAM yes/' /etc/ssh/sshd_config
+
+systemctl restart ssh
+
+# ====================================================
+# FASE 6: USUARIO DEMO
+# ====================================================
+echo -e "${CYAN}[FASE 6] Creando usuario Demo: $USER_DEMO...${NC}"
+
+cat <<EOF > /tmp/demo.ldif
+dn: uid=$USER_DEMO,ou=People,dc=fis,dc=epn,dc=edu,dc=ec
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+cn: Kevin Martinez
+sn: Martinez
+uid: $USER_DEMO
+uidNumber: 1001
+gidNumber: 2000
+homeDirectory: /home/$USER_DEMO
+loginShell: /bin/bash
+gecos: Kevin Martinez
+userPassword: {crypt}x
+shadowLastChange: 19748
+shadowMax: 99999
+shadowWarning: 7
+EOF
+ldapadd -x -D "cn=admin,dc=fis,dc=epn,dc=edu,dc=ec" -w "$PASS_ADMIN" -f /tmp/demo.ldif >/dev/null 2>&1
+
+if ! kadmin.local -q "getprinc $USER_DEMO" | grep -q "Principal: $USER_DEMO"; then
+    kadmin.local -q "addprinc -pw $PASS_DEMO $USER_DEMO"
+fi
+
+if [ ! -d "/home/$USER_DEMO" ]; then
+    mkdir -p /home/$USER_DEMO
+    cp -r /etc/skel/. /home/$USER_DEMO
+    chown -R 1001:2000 /home/$USER_DEMO
+fi
+
+echo -e "${GREEN}==========================================${NC}"
+echo -e "${GREEN}       DESPLIEGUE FINALIZADO v6.1       ${NC}"
+echo -e "${GREEN}==========================================${NC}"
+echo "Test Rápido: getent passwd $USER_DEMO"
