@@ -98,4 +98,3 @@ fi
 echo -e "${GREEN}==========================================${NC}"
 echo -e "${GREEN}       CLIENTE CONFIGURADO CON ÉXITO      ${NC}"
 echo -e "${GREEN}==========================================${NC}"
-echo "Prueba ahora: 'kinit usuario' y luego 'ssh usuario@fis.epn.edu.ec'"
