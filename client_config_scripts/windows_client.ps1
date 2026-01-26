@@ -37,7 +37,7 @@ if ($Adapter) {
     
     # B. CAMBIAR DNS (Primario: Tu Servidor, Secundario: Google)
     Write-Host "   - Estableciendo DNS a $ServerIP..."
-    Set-DnsClientServerAddress -InterfaceIndex $Adapter.InterfaceIndex -ServerAddresses ($ServerIP, "8.8.8.8")
+    Set-DnsClientServerAddress -InterfaceIndex $Adapter.InterfaceIndex -ServerAddresses ($ServerIP)
     
     # C. LIMPIAR CACHE
     Clear-DnsClientCache
