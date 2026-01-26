@@ -2,22 +2,26 @@
 ; BIND data file for fis.epn.edu.ec
 ;
 $TTL    604800
-@       IN      SOA     srv-fis.fis.epn.edu.ec. admin.fis.epn.edu.ec. (
-                              2         ; Serial
+@       IN      SOA     fis.epn.edu.ec. root.fis.epn.edu.ec. (
+                              3         ; Serial
                          604800         ; Refresh
                           86400         ; Retry
                         2419200         ; Expire
                          604800 )       ; Negative Cache TTL
 ;
-; REGISTROS NS
 @       IN      NS      srv-fis.fis.epn.edu.ec.
 
-; REGISTROS A
+; --- REGISTROS A (Direcciones IP) ---
+; El script reemplazará IP_SERVIDOR por la IP real
 @       IN      A       IP_SERVIDOR
 srv-fis IN      A       IP_SERVIDOR
 
-; REGISTROS SRV PARA KERBEROS
-_kerberos._udp.fis.epn.edu.ec.  IN SRV 0 0 88 srv-fis.fis.epn.edu.ec.
-_kerberos._tcp.fis.epn.edu.ec.  IN SRV 0 0 88 srv-fis.fis.epn.edu.ec.
-_kpasswd._udp.fis.epn.edu.ec.   IN SRV 0 0 464 srv-fis.fis.epn.edu.ec.
-_ldap._tcp.fis.epn.edu.ec.      IN SRV 0 0 389 srv-fis.fis.epn.edu.ec.
+; --- REGISTROS SRV (Descubrimiento de Servicios Kerberos) ---
+; Esto permite que los clientes encuentren al KDC sin saber su IP
+_kerberos._udp        IN SRV 0 0 88  srv-fis.fis.epn.edu.ec.
+_kerberos._tcp        IN SRV 0 0 88  srv-fis.fis.epn.edu.ec.
+_kerberos-master._udp IN SRV 0 0 88  srv-fis.fis.epn.edu.ec.
+_kpasswd._udp         IN SRV 0 0 464 srv-fis.fis.epn.edu.ec.
+
+; --- REGISTRO TXT (Nombre del Reino) ---
+_kerberos             IN TXT "FIS.EPN.EDU.EC"
