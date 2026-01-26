@@ -120,4 +120,4 @@ ssh test.user@fis.epn.edu.ec
 
 *Access should be immediate and without a password.*
 
-![Single-Sign On with SSH on Linux client](./img/5_Linux_SSH_Succesful.png)
+![Single Sign-On with SSH on Linux client](./img/5_Linux_SSH_Succesful.png)

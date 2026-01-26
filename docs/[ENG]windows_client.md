@@ -103,4 +103,4 @@ To achieve SSO, PuTTY must be configured to use GSSAPI.
 4. You should see a valid active ticket.
 5. Open **PuTTY**, load the saved session, and click Open. You should log in without being asked for a password.
 
-![Single-Sign On with SSH on Windows client](./img/4_Windows_SSH_Succesful.png)
+![Single Sign-On with SSH on Windows client](./img/4_Windows_SSH_Succesful.png)
