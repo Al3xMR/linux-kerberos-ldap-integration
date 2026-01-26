@@ -7,7 +7,7 @@ Esta guía detalla los pasos para configurar una estación de trabajo Windows 10
 Antes de configurar la red o los scripts, es **obligatorio** instalar el siguiente software:
 
 1.  **MIT Kerberos for Windows (64-bit)**
-    * Descarga oficial: [MIT Kerberos Dist](hhttps://web.mit.edu/kerberos/dist/index.html)
+    * Descarga oficial: [MIT Kerberos Dist](https://web.mit.edu/kerberos/dist/index.html)
     * *Nota:* Reinicia el equipo después de instalar para asegurar que las variables de entorno se carguen.
 2.  **PuTTY (SSH Client)**
     * Descarga: [PuTTY.org](https://www.chiark.greenend.org.uk/~sgtatham/putty/latest.html)
